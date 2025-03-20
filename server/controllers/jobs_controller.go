@@ -16,12 +16,12 @@ import (
 
 type JobIDKeyGenerator struct{}
 
+// Generate extracts job-id from the request and validates it
 func (g JobIDKeyGenerator) Generate(r *http.Request) (string, error) {
 	jobID, ok := mux.Vars(r)["job-id"]
-	if !ok {
+	if !ok || jobID == "" {
 		return "", fmt.Errorf("internal error: no job-id in route")
 	}
-
 	return jobID, nil
 }
 
@@ -81,8 +81,8 @@ func (j *JobsController) GetProjectJobsWS(w http.ResponseWriter, r *http.Request
 	defer executionTime.Stop()
 
 	err := j.getProjectJobsWS(w, r)
-
 	if err != nil {
+		j.Logger.Err(fmt.Sprintf("Error in GetProjectJobsWS: %s", err.Error()))
 		errorCounter.Inc(1)
 	}
 }

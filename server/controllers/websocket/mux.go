@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gorilla/websocket"
@@ -57,26 +58,34 @@ func NewMultiplexor(log logging.SimpleLogging, keyGenerator PartitionKeyGenerato
 // while writing to the websocket until the buffer is closed.
 func (m *Multiplexor) Handle(w http.ResponseWriter, r *http.Request) error {
 	key, err := m.keyGenerator.Generate(r)
-
 	if err != nil {
+		m.writer.log.Err(fmt.Sprintf("Key generation error: %s", err.Error()))
 		return errors.Wrapf(err, "generating partition key")
 	}
 
-	// check if the job ID exists before registering receiver
-	// if !m.registry.IsKeyExists(key) {
-	// 	return fmt.Errorf("invalid key: %s", key)
-	// }
+	// Log key for debugging
+	m.writer.log.Info(fmt.Sprintf("Generated key: %s", key))
+
+	// Check key existence
+	if !m.registry.IsKeyExists(key) {
+		m.writer.log.Err(fmt.Sprintf("Invalid key: %s", key))
+		return fmt.Errorf("invalid key: %s", key)
+	}
 
 	// Buffer size set to 1000 to ensure messages get queued.
 	// TODO: make buffer size configurable
 	buffer := make(chan string, 1000)
 
-	// spinning up a goroutine for this since we are attempting to block on the read side.
+	// Register buffer and handle deregistration
 	go m.registry.Register(key, buffer)
-	defer m.registry.Deregister(key, buffer)
+	defer func() {
+		m.registry.Deregister(key, buffer)
+		m.writer.log.Info(fmt.Sprintf("Deregistered key: %s", key))
+	}()
 
 	err = m.writer.Write(w, r, buffer)
 	if err != nil {
+		m.writer.log.Err(fmt.Sprintf("Writing to ws failed for key %s: %s", key, err.Error()))
 		return errors.Wrapf(err, "writing to ws %s", key)
 	}
 	return nil
